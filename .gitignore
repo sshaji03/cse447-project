@@ -4,3 +4,7 @@ output/
 submit/
 submit.zip
 opus-100-corpus/
+.DS_Store
+.idea/
+.ipynb_checkpoints/
+old en data/
