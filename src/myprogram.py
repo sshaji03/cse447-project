@@ -71,11 +71,45 @@ class MyModel:
     def run_pred(self, data):
         # your code here
         preds = []
-        all_chars = string.ascii_letters
+
+        START = "<s>"
+
+        # load trained best lambdas 
+        with open("work/trained_lambda.txt") as f:
+            l1, l2, l3 = eval(f.read())
+
+        vocab = self.ngrams.get_vocab()
+        uni_prob = self.ngrams.unigram_prob_train
+        bi_prob = self.ngrams.bigram_prob_train
+        tri_prob = self.ngrams.trigram_prob_train
+
         for inp in data:
-            # this model just predicts a random character each time
-            top_guesses = [random.choice(all_chars) for _ in range(3)]
-            preds.append(''.join(top_guesses))
+            # add start <s> symbols as needed
+            if len(inp) == 0:
+                c1, c2 = START, START 
+            elif len(inp) == 1:
+                c1, c2 = START, inp[-1]
+            else:
+                c1, c2 = inp[-2], inp[-1]
+
+            scores = {}
+            for c3 in vocab:
+                uni = l1 * uni_prob.get(c3, 0)
+
+                bi = 0
+                if c2 in vocab:
+                    bi = l2 * bi_prob.get(c2+c3, 0)
+
+                tri = 0
+                if c1 in vocab and c2 in vocab:
+                    tri = l3 * tri_prob.get(c1+c2+c3, 0)
+
+                scores[c3] = uni + bi + tri
+
+            
+            top3 = sorted(scores, key=scores.get, reverse=True)[:3]
+            preds.append("".join(top3))
+
         return preds
 
     def save(self, work_dir):
@@ -95,40 +129,21 @@ class MyModel:
 
 if __name__ == '__main__':
     parser = ArgumentParser(formatter_class=ArgumentDefaultsHelpFormatter)
-    # parser.add_argument('mode', choices=('train', 'test'), help='what to run')
+    parser.add_argument('mode', choices=('train', 'test'), help='what to run')
     parser.add_argument('--work_dir', help='where to save', default='work')
-    # parser.add_argument('--test_data', help='path to test data', default='example/input.txt')
-    # parser.add_argument('--test_output', help='path to write test predictions', default='pred.txt')
+    parser.add_argument('--test_data', help='path to test data', default='example/input.txt')
+    parser.add_argument('--test_output', help='path to write test predictions', default='pred.txt')
     args = parser.parse_args()
-    #
-    # random.seed(0)
-    if not os.path.isdir(args.work_dir):
-        print('Making working directory {}'.format(args.work_dir))
-        os.makedirs(args.work_dir)
-    model = MyModel()
-    model.run_train(args.work_dir)
-    #
-    # if args.mode == 'train':
-    #     if not os.path.isdir(args.work_dir):
-    #         print('Making working directory {}'.format(args.work_dir))
-    #         os.makedirs(args.work_dir)
-    #     print('Instatiating model')
-    #     model = MyModel()
-    #     print('Loading training data')
-    #     train_data = MyModel.load_training_data()
-    #     print('Training')
-    #     model.run_train(train_data, args.work_dir)
-    #     print('Saving model')
-    #     model.save(args.work_dir)
-    # elif args.mode == 'test':
-    #     print('Loading model')
-    #     model = MyModel.load(args.work_dir)
-    #     print('Loading test data from {}'.format(args.test_data))
-    #     test_data = MyModel.load_test_data(args.test_data)
-    #     print('Making predictions')
-    #     pred = model.run_pred(test_data)
-    #     print('Writing predictions to {}'.format(args.test_output))
-    #     assert len(pred) == len(test_data), 'Expected {} predictions but got {}'.format(len(test_data), len(pred))
-    #     model.write_pred(pred, args.test_output)
-    # else:
-    #     raise NotImplementedError('Unknown mode {}'.format(args.mode))
+    
+    if args.mode == 'train':
+        if not os.path.isdir(args.work_dir):
+            print('Making working directory {}'.format(args.work_dir))
+            os.makedirs(args.work_dir)
+        model = MyModel()
+        model.run_train(args.work_dir)
+
+    elif args.mode == 'test':
+        model = MyModel.load(args.work_dir)
+        test_data = MyModel.load_test_data(args.test_data)
+        preds = model.run_pred(test_data)
+        model.write_pred(preds, args.test_output)
