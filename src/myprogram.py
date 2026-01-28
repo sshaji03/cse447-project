@@ -25,7 +25,7 @@ class MyModel:
     def load_test_data(cls, fname):
         # your code here
         data = []
-        with open(fname) as f:
+        with open(fname, encoding="utf-8") as f:
             for line in f:
                 inp = line[:-1]  # the last character is a newline
                 data.append(inp)
@@ -33,7 +33,7 @@ class MyModel:
 
     @classmethod
     def write_pred(cls, preds, fname):
-        with open(fname, 'wt') as f:
+        with open(fname, 'wt', encoding="utf-8") as f:
             for p in preds:
                 f.write('{}\n'.format(p))
 
@@ -73,15 +73,19 @@ class MyModel:
         preds = []
 
         START = "<s>"
+        UNK = "\uE000"
 
         # load trained best lambdas 
         with open("work/trained_lambda.txt") as f:
             l1, l2, l3 = eval(f.read())
 
         vocab = self.ngrams.get_vocab()
-        uni_prob = self.ngrams.unigram_prob_train
-        bi_prob = self.ngrams.bigram_prob_train
-        tri_prob = self.ngrams.trigram_prob_train
+        uni_prob = self.ngrams.unigram_prob_dev
+        bi_prob = self.ngrams.bigram_prob_dev
+        tri_prob = self.ngrams.trigram_prob_dev
+
+        def map_to_vocab(c):
+            return c if c in vocab else UNK
 
         for inp in data:
             # add start <s> symbols as needed
@@ -94,19 +98,18 @@ class MyModel:
 
             scores = {}
             for c3 in vocab:
-                uni = l1 * uni_prob.get(c3, 0)
+                uni = l1 * uni_prob.get(c3, uni_prob.get(UNK, 0))
 
                 bi = 0
-                if c2 in vocab:
+                if c2 != UNK and c3 != UNK:
                     bi = l2 * bi_prob.get(c2+c3, 0)
 
                 tri = 0
-                if c1 in vocab and c2 in vocab:
+                if c1 != UNK and c2 != UNK:
                     tri = l3 * tri_prob.get(c1+c2+c3, 0)
 
                 scores[c3] = uni + bi + tri
 
-            
             top3 = sorted(scores, key=scores.get, reverse=True)[:3]
             preds.append("".join(top3))
 
@@ -122,8 +125,8 @@ class MyModel:
     def load(cls, work_dir):
         # your code here
         # this particular model has nothing to load, but for demonstration purposes we will load a blank file
-        with open(os.path.join(work_dir, 'model.checkpoint')) as f:
-            dummy_save = f.read()
+        # with open(os.path.join(work_dir, 'model.checkpoint')) as f:
+        #     dummy_save = f.read()
         return MyModel()
 
 
