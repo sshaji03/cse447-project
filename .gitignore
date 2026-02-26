@@ -7,3 +7,4 @@ opus-100-corpus/
 .idea/
 .ipynb_checkpoints/
 old en data/
+.env
