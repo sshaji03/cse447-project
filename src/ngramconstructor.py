@@ -50,81 +50,120 @@ class NgramConstructor:
         trigram_df_train = pd.read_csv(TRIGRAM_TRAIN, dtype={'char_ngram': str})
         trigram_df_dev = pd.read_csv(TRIGRAM_DEV, dtype={'char_ngram': str})
 
-        for _, row in unigram_df_train.iterrows():
-            unigram = str(row['char_ngram'])
-            count = row['count']
+        print("Loading unigram train...")
+
+        for row in unigram_df_train.itertuples(index=False):
+            unigram = str(row.char_ngram)
+            count = row.count
+
             self.unigram_token_total_train += count
-            if unigram in self.unigram_train.keys():
+
+            if unigram in self.unigram_train:
                 self.unigram_train[unigram] += count
             else:
                 self.vocab.add(unigram)
                 self.unigram_train[unigram] = count
 
-        for  _, row in unigram_df_dev.iterrows():
-            unigram = str(row['char_ngram'])
-            count = row['count']
+        print("Finished unigram train")
+
+        print("Loading unigram dev...")
+
+        for row in unigram_df_dev.itertuples(index=False):
+            unigram = str(row.char_ngram)
+            count = row.count
+
             self.unigram_token_total_dev += count
-            if unigram in self.unigram_dev.keys():
-                self.unigram_dev[unigram] += count
-            else:
-                self.unigram_dev[unigram] = count
+            self.unigram_dev[unigram] = self.unigram_dev.get(unigram, 0) + count
+
+        print("Finished unigram dev")
+
+        print("Loading fivegram train files...")
 
         files = os.listdir(FIVEGRAM_TRAIN)
+
         for file in files:
+            print("  Reading:", file)
+
             path = os.path.join(FIVEGRAM_TRAIN, file)
             csv = pd.read_csv(path, dtype={'char_ngram': str})
-            for _, row in csv.iterrows():
-                fivegram = str(row['char_ngram'])
+
+            for row in csv.itertuples(index=False):
+                fivegram = str(row.char_ngram)
+
                 if len(fivegram) < 5:
                     continue
-                count = row['count']
-                self.fivegrams_train[fivegram] = self.fivegrams_train.get(fivegram, 0) + count
 
-                c1, c2, c3, c4, c5 = fivegram
-                context = c1 + c2 + c3 + c4
-                self.fivegrams_token_counts_train[context] = self.fivegrams_token_counts_train.get(context, 0) + count
+                count = row.count
+                self.fivegrams_train[fivegram] = (
+                        self.fivegrams_train.get(fivegram, 0) + count
+                )
 
-        for _, row in fivegram_df_dev.iterrows():
-            fivegram = str(row['char_ngram'])
+                context = fivegram[:4]
+                self.fivegrams_token_counts_train[context] = (
+                        self.fivegrams_token_counts_train.get(context, 0) + count
+                )
+
+        print("Finished fivegram train")
+
+        print("Loading fivegram dev...")
+
+        for row in fivegram_df_dev.itertuples(index=False):
+            fivegram = str(row.char_ngram)
+
             if len(fivegram) < 5:
                 continue
 
-            count = row['count']
-            self.fivegrams_dev[fivegram] = self.fivegrams_dev.get(fivegram, 0) + count
+            count = row.count
+            self.fivegrams_dev[fivegram] = (
+                    self.fivegrams_dev.get(fivegram, 0) + count
+            )
 
-            c1, c2, c3, c4, c5 = fivegram
-            context = c1 + c2 + c3 + c4
-            self.fivegrams_token_counts_dev[context] = self.fivegrams_token_counts_dev.get(context, 0) + count
+            context = fivegram[:4]
+            self.fivegrams_token_counts_dev[context] = (
+                    self.fivegrams_token_counts_dev.get(context, 0) + count
+            )
 
-        for _, row in trigram_df_train.iterrows():
-            trigram = str(row['char_ngram'])
-            count = row['count']
+        print("Finished fivegram dev")
 
-            # one special case that isn't being counted as 3 because of how computer is interpreting
-            # frequency of (1) so okay to skip
-            if (len(trigram) < 3):
+        print("Loading trigram train...")
+
+        for row in trigram_df_train.itertuples(index=False):
+            trigram = str(row.char_ngram)
+
+            if len(trigram) < 3:
                 continue
 
-            self.trigrams_train[trigram] = self.trigrams_train.get(trigram, 0) + count
-            c1, c2, c3 = trigram
+            count = row.count
+            self.trigrams_train[trigram] = (
+                    self.trigrams_train.get(trigram, 0) + count
+            )
 
-            context = c1 + c2
-            self.trigram_token_counts_train[context] = self.trigram_token_counts_train.get(context, 0) + count
+            context = trigram[:2]
+            self.trigram_token_counts_train[context] = (
+                    self.trigram_token_counts_train.get(context, 0) + count
+            )
 
-        for _, row in trigram_df_dev.iterrows():
-            trigram = str(row['char_ngram'])
-            count = row['count']
+        print("Finished trigram train")
 
-            # one special case that isn't being counted as 3 because of how computer is interpreting
-            # frequency of (1) so okay to skip
-            if (len(trigram) < 3):
+        print("Loading trigram dev...")
+
+        for row in trigram_df_dev.itertuples(index=False):
+            trigram = str(row.char_ngram)
+
+            if len(trigram) < 3:
                 continue
 
-            self.trigrams_dev[trigram] = self.trigrams_dev.get(trigram, 0) + count
+            count = row.count
+            self.trigrams_dev[trigram] = (
+                    self.trigrams_dev.get(trigram, 0) + count
+            )
 
-            c1, c2, c3 = trigram
-            context = c1 + c2
-            self.trigram_token_counts_dev[context] = self.trigram_token_counts_dev.get(context, 0) + count
+            context = trigram[:2]
+            self.trigram_token_counts_dev[context] = (
+                    self.trigram_token_counts_dev.get(context, 0) + count
+            )
+
+        print("Finished trigram dev")
 
         for unigram in self.unigram_train.keys():
             self.unigram_prob_train[unigram] = self.unigram_train[unigram] / self.unigram_token_total_train
@@ -181,9 +220,12 @@ class NgramConstructor:
             trigram = c3 + c4 + unigram
             unigram = unigram if unigram in self.vocab else UNK_CHAR
 
-            uni = lambda1 * self.unigram_prob_train[unigram]
-            tri = lambda2 * self.trigram_prob_train[trigram]
-            five = lambda3 * self.fivegram_prob_train[fivegram]
+            uni = lambda1 * self.unigram_prob_train.get(unigram,
+                                                      self.unigram_prob_dev.get(UNK_CHAR, 1e-12))
+
+            tri = lambda2 * self.trigram_prob_train.get(trigram, 1e-12)
+
+            five = lambda3 * self.fivegram_prob_train.get(fivegram, 1e-12)
 
             log_prob_sum += count * math.log(uni + tri + five)
 
@@ -199,9 +241,12 @@ class NgramConstructor:
             trigram = c3 + c4 + unigram
             unigram = unigram if unigram in self.vocab else UNK_CHAR
 
-            uni = lambda1 * self.unigram_prob_dev[unigram]
-            tri = lambda2 * self.trigram_prob_dev[trigram]
-            five = lambda3 * self.fivegram_prob_dev[fivegram]
+            uni = lambda1 * self.unigram_prob_dev.get(unigram,
+                                                      self.unigram_prob_dev.get(UNK_CHAR, 1e-12))
+
+            tri = lambda2 * self.trigram_prob_dev.get(trigram, 1e-12)
+
+            five = lambda3 * self.fivegram_prob_dev.get(fivegram, 1e-12)
 
             log_prob_sum += count * math.log(uni + tri + five)
 

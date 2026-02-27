@@ -67,48 +67,36 @@ class MyModel:
         print("best lambda:", best_lambdas)
         print("saved to:", os.path.join(work_dir, 'trained_lambda.txt'))
 
-
     def run_pred(self, data):
-        # your code here
         preds = []
 
         START = "<s>"
         UNK = "\uE000"
 
-        # load trained best lambdas 
+        # load lambdas
         with open("work/trained_lambda.txt") as f:
             l1, l2, l3 = eval(f.read())
 
         vocab = self.ngrams.get_vocab()
-        uni_prob = self.ngrams.unigram_prob_dev
-        bi_prob = self.ngrams.bigram_prob_dev
-        tri_prob = self.ngrams.trigram_prob_dev
 
-        def map_to_vocab(c):
-            return c if c in vocab else UNK
+        uni_prob = self.ngrams.unigram_prob_dev
+        tri_prob = self.ngrams.trigram_prob_dev
+        five_prob = self.ngrams.fivegram_prob_dev
 
         for inp in data:
-            # add start <s> symbols as needed
-            if len(inp) == 0:
-                c1, c2 = START, START 
-            elif len(inp) == 1:
-                c1, c2 = START, inp[-1]
-            else:
-                c1, c2 = inp[-2], inp[-1]
+
+            # pad with start symbols
+            context = (START * 4 + inp)[-4:]
+            c1, c2, c3, c4 = context
 
             scores = {}
-            for c3 in vocab:
-                uni = l1 * uni_prob.get(c3, uni_prob.get(UNK, 0))
 
-                bi = 0
-                if c2 != UNK and c3 != UNK:
-                    bi = l2 * bi_prob.get(c2+c3, 0)
+            for c5 in vocab:
+                uni = l1 * uni_prob.get(c5, uni_prob.get(UNK, 0))
+                tri = l2 * tri_prob.get(c3 + c4 + c5, 0)
+                five = l3 * five_prob.get(c1 + c2 + c3 + c4 + c5, 0)
 
-                tri = 0
-                if c1 != UNK and c2 != UNK:
-                    tri = l3 * tri_prob.get(c1+c2+c3, 0)
-
-                scores[c3] = uni + bi + tri
+                scores[c5] = uni + tri + five
 
             top3 = sorted(scores, key=scores.get, reverse=True)[:3]
             preds.append("".join(top3))
