@@ -1,25 +1,79 @@
 #!/usr/bin/env python
 import os
-import string
-import random
+import json
+import torch
+import torch.nn as nn
+from torch.utils.data import Dataset, DataLoader
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
-from ngramconstructor import NgramConstructor
-import math
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+WORK_DIR = os.path.join(BASE_DIR, "../work")
+SEQ_LEN  = 100
+LEARNING_RATE = 3e-4
+
+class Transformer(nn.Module):
+    def __init__(self, vocab_size, embed_dim=256, num_heads=8,
+                 num_layers=6, ff_dim=512, max_seq=512, dropout=0.1):
+        super().__init__()
+        self.embed = nn.Embedding(vocab_size, embed_dim, padding_idx=0)
+        self.pos_enc = nn.Embedding(max_seq, embed_dim)
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=embed_dim, nhead=num_heads,
+            dim_feedforward=ff_dim, dropout=dropout,
+            batch_first=True
+        )
+        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+        self.fc = nn.Linear(embed_dim, vocab_size)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, x):
+        seq_len = x.size(1)
+        positions = torch.arange(seq_len, device=x.device).unsqueeze(0)
+
+        # casual mask
+        mask = nn.Transformer.generate_square_subsequent_mask(seq_len, device=x.device)
+        # drop out to prevent overfitting
+        out = self.dropout(self.embed(x) + self.pos_enc(positions))
+        # run transformer
+        out = self.transformer(out, mask=mask, is_causal=True)
+        return self.fc(out)
+
+class CharDataset(Dataset):
+    def __init__(self, texts, char2idx, seq_len, stride = 10):
+        self.seq_len = seq_len
+        self.char2idx = char2idx
+        # Flatten all text into one big stream
+        full = "\n".join(texts)
+        self.data = [char2idx.get(c, 1) for c in full]
+        self.indices = list(range(0, len(self.data) - seq_len, stride))
+
+    def __len__(self):
+        return len(self.indices)
+
+    def __getitem__(self, idx):
+        start = self.indices[idx]
+        x = torch.tensor(self.data[start:start+self.seq_len], dtype=torch.long)
+        y = torch.tensor(self.data[start+1:start+self.seq_len+1], dtype=torch.long)
+        return x, y
 
 
 class MyModel:
     """
     This is a starter model to get you started. Feel free to modify this file.
     """
-    ngrams = NgramConstructor()
+
+    def __init__(self):
+        self.model    = None
+        self.char2idx = None
+        self.idx2char = None
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     @classmethod
     def load_training_data(cls):
-        # our training data is too large to upload to git so we have saved the
-        # ngram hash tables to our work directory
-        # the NgramConstructor is our way to receive this data, so there's no need
-        # to load anything here
-        return
+        with open(os.path.join(WORK_DIR, "all_text.json"), "r", encoding="utf-8") as f:
+            all_text = json.load(f)
+
+        return all_text
 
     @classmethod
     def load_test_data(cls, fname):
@@ -38,84 +92,103 @@ class MyModel:
                 f.write('{}\n'.format(p))
 
     def run_train(self, work_dir):
-        # your code here
-        lambda_options = [
-            [0.1, 0.3, 0.6],
-            [0.15, 0.2, 0.7],
-            [0.25, 0.25, 0.5],
-            [0.3, 0.4, 0.3],
-            [0.33, 0.33, 0.34]
-        ]
+        # create data loaders
+        all_text = self.load_training_data()
 
-        best_lambdas = []
-        best_dev_p = math.inf
+        chars = sorted(set("".join(all_text)))
+        self.char2idx = {"<PAD>": 0, "<UNK>": 1}
+        for c in chars:
+            self.char2idx[c] = len(self.char2idx)
+        self.idx2char = {i: c for c, i in self.char2idx.items()}
+        vocab_size = len(self.char2idx)
+        print(f"Vocab size: {vocab_size}")
 
-        for lambda_ in lambda_options:
-            l1, l2, l3 = lambda_
-            dev_p = self.ngrams.calculate_dev_perplexity(l1, l2, l3)
+        with open(os.path.join(work_dir, "vocab.json"), "w", encoding="utf-8") as f:
+            json.dump({"char2idx": self.char2idx, "idx2char": self.idx2char}, f, ensure_ascii=False)
 
-            if dev_p < best_dev_p:
-                best_dev_p = dev_p
-                best_lambdas = lambda_
+        dataset = CharDataset(all_text, self.char2idx, SEQ_LEN)
+        loader = DataLoader(dataset, batch_size=256, shuffle=True, num_workers=2)
 
-        # store lambdas in work
-        f = open(os.path.join(work_dir, 'trained_lambda.txt'), 'w')
-        f.write(str(best_lambdas))
-        f.close()
+        model = Transformer(vocab_size)
 
-        print("best dev p:", best_dev_p)
-        print("best lambda:", best_lambdas)
-        print("saved to:", os.path.join(work_dir, 'trained_lambda.txt'))
+        opt = torch.optim.Adam(model.parameters())
+        sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=20)
+        loss_fn = nn.CrossEntropyLoss(ignore_index=0)
+
+        for epoch in range(20):
+            model.train()
+            total_loss = 0
+            for i, (x, y) in enumerate(loader):
+                opt.zero_grad()
+                logits = model(x)
+                loss = loss_fn(logits.view(-1, vocab_size), y.view(-1))
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                opt.step()
+
+                # avoid OOM
+                del logits
+                torch.cuda.empty_cache()
+                total_loss += loss.item()
+
+                if i % 200 == 0:
+                    print(f"Epoch {epoch + 1} Step {i} Loss {loss.item():.4f}")
+
+            sched.step()
+            avg = total_loss / len(loader)
+            print(f"Epoch {epoch + 1} avg loss: {avg:.4f}")
+
+        self.save(work_dir)
 
     def run_pred(self, data):
         preds = []
-
-        START = "<s>"
-        UNK = "\uE000"
-
-        # load lambdas
-        with open("work/trained_lambda.txt") as f:
-            l1, l2, l3 = eval(f.read())
-
-        vocab = self.ngrams.get_vocab()
-
-        uni_prob = self.ngrams.unigram_prob_dev
-        tri_prob = self.ngrams.trigram_prob_dev
-        five_prob = self.ngrams.fivegram_prob_dev
-
         for inp in data:
-
-            # pad with start symbols
-            context = (START * 4 + inp)[-4:]
-            c1, c2, c3, c4 = context
-
-            scores = {}
-
-            for c5 in vocab:
-                uni = l1 * uni_prob.get(c5, uni_prob.get(UNK, 0))
-                tri = l2 * tri_prob.get(c3 + c4 + c5, 0)
-                five = l3 * five_prob.get(c1 + c2 + c3 + c4 + c5, 0)
-
-                scores[c5] = uni + tri + five
-
-            top3 = sorted(scores, key=scores.get, reverse=True)[:3]
-            preds.append("".join(top3))
+            context = inp[-SEQ_LEN:]
+            # get numbers or unknown number
+            ids = [self.char2idx.get(c, 1) for c in context]
+            x = torch.tensor([ids], dtype=torch.long)
+            with torch.no_grad():
+                logits = self.model(x)
+            last_logits = logits[0, -1]
+            # removing pad and unknown tokens
+            last_logits[0] = float('-inf')
+            last_logits[1] = float('-inf')
+            top3_ids = torch.topk(last_logits, 3).indices.tolist()
+            top3_chars = [self.idx2char.get(i, "?") for i in top3_ids]
+            preds.append("".join(top3_chars))
 
         return preds
 
     def save(self, work_dir):
-        # your code here
-        # this particular model has nothing to save, but for demonstration purposes we will save a blank file
-        with open(os.path.join(work_dir, 'model.checkpoint'), 'wt') as f:
-            f.write('dummy save')
+        torch.save({
+            "model_state": self.model.state_dict(),
+            "vocab_size": len(self.char2idx),
+            "embed_dim": self.model.embed.embedding_dim,
+            "num_heads": self.model.transformer.layers[0].self_attn.num_heads,
+            "num_layers": len(self.model.transformer.layers),
+            "ff_dim": self.model.transformer.layers[0].linear1.out_features,
+        }, os.path.join(work_dir, "model.pt"))
 
     @classmethod
     def load(cls, work_dir):
-        # your code here
-        # this particular model has nothing to load, but for demonstration purposes we will load a blank file
-        # with open(os.path.join(work_dir, 'model.checkpoint')) as f:
-        #     dummy_save = f.read()
-        return MyModel()
+        m = cls()
+
+        with open(os.path.join(work_dir, "vocab.json"), "r", encoding="utf-8") as f:
+            vocab = json.load(f)
+        m.char2idx = vocab["char2idx"]
+        m.idx2char = {int(k): v for k, v in vocab["idx2char"].items()}
+
+        model_saved = torch.load(os.path.join(work_dir, "model.pt"), map_location=m.device)
+        m.model = Transformer(
+            vocab_size=model_saved["vocab_size"],
+            embed_dim=model_saved["embed_dim"],
+            num_heads=model_saved["num_heads"],
+            num_layers=model_saved["num_layers"],
+            ff_dim=model_saved["ff_dim"],
+        )
+        m.model.load_state_dict(model_saved["model_state"])
+        m.model.eval()
+        return m
 
 
 if __name__ == '__main__':
